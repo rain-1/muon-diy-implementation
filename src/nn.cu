@@ -12,7 +12,8 @@ namespace muon {
 
 namespace {
 
-constexpr float kGeluCoeff = std::sqrt(2.0f / static_cast<float>(M_PI));
+// Precomputed sqrt(2 / pi) to avoid non-constexpr sqrt on older CUDA toolchains.
+static const float kGeluCoeff = 0.7978845608f;
 
 inline void check_cuda(cudaError_t err, const char* msg) {
     if (err != cudaSuccess) {
