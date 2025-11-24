@@ -136,7 +136,7 @@ int main() {
     NeuralNetwork net({input_dim, 256, 128, 64, num_classes});
 
     const int batch_size = 128;
-    const int epochs = 2;
+    const int epochs = 15;
     const float learning_rate = 0.01f;
     const int steps_per_epoch = train_samples / batch_size;
 
