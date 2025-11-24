@@ -23,6 +23,34 @@ cmake --build . --target xor_example
 ./xor_example
 ```
 
+### MNIST example
+
+1. Prepare the dataset (writes normalized binaries under `datasets/mnist/processed`).
+   The script can consume either the original IDX gzip archives **or** the
+   HuggingFace parquet export (`train-00000-of-00001.parquet` and
+   `test-00000-of-00001.parquet`). If you already have the dataset, place it
+   under `datasets/mnist/source/` (with or without git metadata). Otherwise, it
+   will attempt to clone `https://huggingface.co/datasets/ylecun/mnist` using
+   git-lfs.
+
+   ```bash
+   # Optional: only required if cloning the HuggingFace repository
+   git lfs install --system
+
+   # Required when reading parquet exports
+   pip install pyarrow pillow
+   python3 tools/prepare_mnist.py
+   ```
+
+2. Build and run the MNIST demo (requires CUDA):
+
+   ```bash
+   mkdir -p build && cd build
+   cmake ..
+   cmake --build . --target mnist_example
+   ./mnist_example
+   ```
+
 ## Usage sketch
 
 ```cpp
