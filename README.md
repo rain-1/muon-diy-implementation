@@ -23,6 +23,24 @@ cmake --build . --target xor_example
 ./xor_example
 ```
 
+### MNIST example
+
+1. Prepare the dataset (downloads the raw files from Yann LeCun's site and writes normalized binaries under
+   `datasets/mnist/processed`):
+
+   ```bash
+   python3 tools/prepare_mnist.py
+   ```
+
+2. Build and run the MNIST demo (requires CUDA):
+
+   ```bash
+   mkdir -p build && cd build
+   cmake ..
+   cmake --build . --target mnist_example
+   ./mnist_example
+   ```
+
 ## Usage sketch
 
 ```cpp
