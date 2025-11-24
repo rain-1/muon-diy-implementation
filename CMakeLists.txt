@@ -15,3 +15,7 @@ set_target_properties(xor_example PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 add_executable(mnist_example examples/mnist.cu)
 target_link_libraries(mnist_example PRIVATE muon_nn)
 set_target_properties(mnist_example PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+add_executable(cifar100_example examples/cifar100.cu)
+target_link_libraries(cifar100_example PRIVATE muon_nn)
+set_target_properties(cifar100_example PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

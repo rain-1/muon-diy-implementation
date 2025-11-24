@@ -51,6 +51,26 @@ cmake --build . --target xor_example
    ./mnist_example
    ```
 
+### CIFAR-100 example
+
+1. Prepare the dataset (writes normalized binaries under `datasets/cifar100/processed`).
+   The script standardizes channels to the common CIFAR-100 mean/std using the
+   HuggingFace dataset `uoft-cs/cifar100` and requires `datasets` and `Pillow`.
+
+   ```bash
+   pip install datasets pillow
+   python3 tools/prepare_cifar100.py
+   ```
+
+2. Build and run the CIFAR-100 demo (requires CUDA):
+
+   ```bash
+   mkdir -p build && cd build
+   cmake ..
+   cmake --build . --target cifar100_example
+   ./cifar100_example
+   ```
+
 ## Usage sketch
 
 ```cpp
