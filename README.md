@@ -98,3 +98,32 @@ int main() {
 ```
 
 See `design.md` for notes on future logging and dataset integrations.
+
+## Drag-and-drop demo webapp
+
+This repository now ships a tiny FastAPI web application that resizes an
+uploaded image to **32×32**, forwards it to a lightweight C++ classifier
+binary, and renders the top-3 labels returned by the binary.
+
+### Build the classifier binary
+
+```bash
+mkdir -p build && cd build
+cmake ..
+cmake --build . --target image_classifier
+```
+
+### Run the webapp
+
+```bash
+cd webapp
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn main:app --reload
+```
+
+By default the API looks for the binary at `../build/image_classifier`. Override
+the path with `IMAGE_CLASSIFIER_BIN=/custom/path uvicorn main:app --reload` if
+needed. Open `http://127.0.0.1:8000/` and drag an image into the drop zone to
+see the predicted labels.
