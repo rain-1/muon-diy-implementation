@@ -105,6 +105,31 @@ __global__ void zero_kernel(float* ptr, int n) {
     if (idx < n) ptr[idx] = 0.0f;
 }
 
+__global__ void adamw_kernel(float* param,
+                             const float* grad,
+                             float* m,
+                             float* v,
+                             float lr,
+                             float beta1,
+                             float beta2,
+                             float eps,
+                             float weight_decay,
+                             float bias_correction1,
+                             float bias_correction2,
+                             int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+    float g = grad[idx];
+    float m_new = beta1 * m[idx] + (1.0f - beta1) * g;
+    float v_new = beta2 * v[idx] + (1.0f - beta2) * g * g;
+    m[idx] = m_new;
+    v[idx] = v_new;
+    float m_hat = m_new / bias_correction1;
+    float v_hat = v_new / bias_correction2;
+    float update = m_hat / (sqrtf(v_hat) + eps) + weight_decay * param[idx];
+    param[idx] -= lr * update;
+}
+
 }  // namespace
 
 NeuralNetwork::NeuralNetwork(const std::vector<int>& layer_sizes) : layer_sizes_(layer_sizes) {
@@ -124,6 +149,7 @@ NeuralNetwork& NeuralNetwork::operator=(NeuralNetwork&& other) noexcept {
     release();
     layer_sizes_ = std::move(other.layer_sizes_);
     layers_ = std::move(other.layers_);
+    adam_step_ = other.adam_step_;
     other.layers_.clear();
     return *this;
 }
@@ -140,6 +166,14 @@ void NeuralNetwork::allocate_layers() {
         check_cuda(cudaMalloc(&layer.bias, layer.out_dim * sizeof(float)), "malloc bias");
         check_cuda(cudaMalloc(&layer.grad_weights, weight_size * sizeof(float)), "malloc grad weights");
         check_cuda(cudaMalloc(&layer.grad_bias, layer.out_dim * sizeof(float)), "malloc grad bias");
+        check_cuda(cudaMalloc(&layer.m_weights, weight_size * sizeof(float)), "malloc m weights");
+        check_cuda(cudaMalloc(&layer.v_weights, weight_size * sizeof(float)), "malloc v weights");
+        check_cuda(cudaMalloc(&layer.m_bias, layer.out_dim * sizeof(float)), "malloc m bias");
+        check_cuda(cudaMalloc(&layer.v_bias, layer.out_dim * sizeof(float)), "malloc v bias");
+        check_cuda(cudaMemset(layer.m_weights, 0, weight_size * sizeof(float)), "zero m weights");
+        check_cuda(cudaMemset(layer.v_weights, 0, weight_size * sizeof(float)), "zero v weights");
+        check_cuda(cudaMemset(layer.m_bias, 0, layer.out_dim * sizeof(float)), "zero m bias");
+        check_cuda(cudaMemset(layer.v_bias, 0, layer.out_dim * sizeof(float)), "zero v bias");
         layers_[i] = layer;
     }
 }
@@ -261,6 +295,47 @@ void NeuralNetwork::sgd_update(float learning_rate, cudaStream_t stream) {
     }
 }
 
+void NeuralNetwork::adamw_update(float learning_rate,
+                                 float beta1,
+                                 float beta2,
+                                 float eps,
+                                 float weight_decay,
+                                 cudaStream_t stream) {
+    ++adam_step_;
+    float bias_correction1 = 1.0f - std::pow(beta1, static_cast<float>(adam_step_));
+    float bias_correction2 = 1.0f - std::pow(beta2, static_cast<float>(adam_step_));
+    int threads = 256;
+    for (auto& layer : layers_) {
+        size_t w_elems = static_cast<size_t>(layer.in_dim) * layer.out_dim;
+        int blocks_w = static_cast<int>((w_elems + threads - 1) / threads);
+        int blocks_b = static_cast<int>((layer.out_dim + threads - 1) / threads);
+        adamw_kernel<<<blocks_w, threads, 0, stream>>>(layer.weights,
+                                                       layer.grad_weights,
+                                                       layer.m_weights,
+                                                       layer.v_weights,
+                                                       learning_rate,
+                                                       beta1,
+                                                       beta2,
+                                                       eps,
+                                                       weight_decay,
+                                                       bias_correction1,
+                                                       bias_correction2,
+                                                       static_cast<int>(w_elems));
+        adamw_kernel<<<blocks_b, threads, 0, stream>>>(layer.bias,
+                                                       layer.grad_bias,
+                                                       layer.m_bias,
+                                                       layer.v_bias,
+                                                       learning_rate,
+                                                       beta1,
+                                                       beta2,
+                                                       eps,
+                                                       weight_decay,
+                                                       bias_correction1,
+                                                       bias_correction2,
+                                                       layer.out_dim);
+    }
+}
+
 void NeuralNetwork::release_context(ForwardContext& ctx) {
     for (auto& cache : ctx.caches) {
         if (cache.pre_activation) cudaFree(cache.pre_activation);
@@ -337,8 +412,13 @@ void NeuralNetwork::release() {
         if (layer.bias) cudaFree(layer.bias);
         if (layer.grad_weights) cudaFree(layer.grad_weights);
         if (layer.grad_bias) cudaFree(layer.grad_bias);
+        if (layer.m_weights) cudaFree(layer.m_weights);
+        if (layer.v_weights) cudaFree(layer.v_weights);
+        if (layer.m_bias) cudaFree(layer.m_bias);
+        if (layer.v_bias) cudaFree(layer.v_bias);
     }
     layers_.clear();
+    adam_step_ = 0;
 }
 
 }  // namespace muon
