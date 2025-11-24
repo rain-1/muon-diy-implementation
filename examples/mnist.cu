@@ -220,7 +220,7 @@ int main() {
         throw std::runtime_error("No test samples available for evaluation");
     }
 
-    const int test_batch = std::min(test_samples, 256);
+    const int test_batch = std::min(test_samples, batch_size);
     check_cuda(cudaMemcpy(device_inputs,
                            test_images.data.data(),
                            static_cast<size_t>(test_batch * input_dim) * sizeof(float),
