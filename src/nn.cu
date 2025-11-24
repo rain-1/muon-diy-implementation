@@ -235,7 +235,7 @@ void NeuralNetwork::backward(const float* device_input,
     }
 
     const float* upstream = grad_output;
-    float* grad_current_input = nullptr;
+    float* owned_upstream = nullptr;
 
     for (int layer_idx = static_cast<int>(layers_.size()) - 1; layer_idx >= 0; --layer_idx) {
         const auto& layer = layers_[layer_idx];
@@ -266,21 +266,28 @@ void NeuralNetwork::backward(const float* device_input,
         // Gradient for previous activation.
         size_t grad_in_size = static_cast<size_t>(batch_size) * layer.in_dim;
         int blocks_in = static_cast<int>((grad_in_size + threads - 1) / threads);
+        float* grad_current_input = nullptr;
         check_cuda(cudaMalloc(&grad_current_input, grad_in_size * sizeof(float)), "alloc grad input");
         linear_backward_input_kernel<<<blocks_in, threads, 0, stream>>>(grad_activation, layer.weights,
                                                                         grad_current_input, batch_size, layer.in_dim,
                                                                         layer.out_dim);
 
         check_cuda(cudaFree(grad_activation), "free grad activation");
+        if (owned_upstream) {
+            check_cuda(cudaFree(owned_upstream), "free upstream grad");
+        }
+        owned_upstream = grad_current_input;
         upstream = grad_current_input;
     }
 
     // Copy gradient at input to caller buffer.
     size_t input_elems = static_cast<size_t>(batch_size) * layer_sizes_.front();
-    check_cuda(cudaMemcpyAsync(grad_input, grad_current_input, input_elems * sizeof(float), cudaMemcpyDeviceToDevice,
+    check_cuda(cudaMemcpyAsync(grad_input, owned_upstream, input_elems * sizeof(float), cudaMemcpyDeviceToDevice,
                                stream),
                "copy grad input");
-    check_cuda(cudaFree(grad_current_input), "free grad input");
+    if (owned_upstream) {
+        check_cuda(cudaFree(owned_upstream), "free grad input");
+    }
 }
 
 void NeuralNetwork::sgd_update(float learning_rate, cudaStream_t stream) {
