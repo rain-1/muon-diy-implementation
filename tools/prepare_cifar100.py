@@ -68,7 +68,11 @@ def prepare_dataset(root: Path) -> None:
         raise ValueError(f"None of the candidate columns {names} were found in split")
 
     image_column_candidates = ("image", "img")
-    label_column_candidates = ("fine_label", "label", "coarse_label", "course_label")
+    #label_column_candidates = ("fine_label", "label", "coarse_label", "course_label")
+    label_column_candidates = ("coarse_label",)
+
+    # print columns for debug
+    print(f"Available columns: {train.column_names}")
 
     train_images = normalize_images(get_column(train, image_column_candidates))
     test_images = normalize_images(get_column(test, image_column_candidates))
