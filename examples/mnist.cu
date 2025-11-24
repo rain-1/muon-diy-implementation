@@ -2,6 +2,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -207,7 +208,19 @@ int main() {
     }
 
     // Quick evaluation on the first test batch.
-    const int test_batch = 256;
+    if (test_images.shape.size() != 2 || test_images.shape[1] != input_dim) {
+        throw std::runtime_error("Test images must have shape [N, 784]");
+    }
+    if (test_labels.shape.size() != 2 || test_labels.shape[1] != num_classes) {
+        throw std::runtime_error("Test labels must have shape [N, 10]");
+    }
+
+    const int test_samples = test_images.shape[0];
+    if (test_samples == 0) {
+        throw std::runtime_error("No test samples available for evaluation");
+    }
+
+    const int test_batch = std::min(test_samples, 256);
     check_cuda(cudaMemcpy(device_inputs,
                            test_images.data.data(),
                            static_cast<size_t>(test_batch * input_dim) * sizeof(float),
