@@ -12,6 +12,17 @@ cmake --build .
 
 This produces a static library `libmuon_nn.a` exposing the neural network interface in `include/nn.h`. CUDA is required for compilation.
 
+### XOR example
+
+To build the provided XOR training demo:
+
+```bash
+mkdir -p build && cd build
+cmake ..
+cmake --build . --target xor_example
+./xor_example
+```
+
 ## Usage sketch
 
 ```cpp
