@@ -19,6 +19,11 @@ struct LinearLayer {
     float* bias{nullptr};
     float* grad_weights{nullptr};
     float* grad_bias{nullptr};
+    // Adam moment estimates.
+    float* m_weights{nullptr};
+    float* v_weights{nullptr};
+    float* m_bias{nullptr};
+    float* v_bias{nullptr};
 };
 
 struct ForwardContext {
@@ -56,6 +61,14 @@ class NeuralNetwork {
     // Apply a simple SGD update to parameters with the given learning rate.
     void sgd_update(float learning_rate, cudaStream_t stream = 0);
 
+    // Apply AdamW update with bias correction and weight decay.
+    void adamw_update(float learning_rate,
+                      float beta1 = 0.9f,
+                      float beta2 = 0.999f,
+                      float eps = 1e-8f,
+                      float weight_decay = 0.01f,
+                      cudaStream_t stream = 0);
+
     // Release device memory allocated during forward passes.
     static void release_context(ForwardContext& ctx);
 
@@ -68,6 +81,7 @@ class NeuralNetwork {
   private:
     std::vector<int> layer_sizes_;
     std::vector<LinearLayer> layers_;
+    int64_t adam_step_{0};
 
     void allocate_layers();
     void initialize_parameters();

@@ -137,7 +137,11 @@ int main() {
 
     const int batch_size = 128;
     const int epochs = 15;
-    const float learning_rate = 0.01f;
+    const float learning_rate = 0.001f;
+    const float beta1 = 0.9f;
+    const float beta2 = 0.999f;
+    const float eps = 1e-8f;
+    const float weight_decay = 0.01f;
     const int steps_per_epoch = train_samples / batch_size;
 
     float* device_inputs = nullptr;
@@ -197,7 +201,7 @@ int main() {
             mse_grad_kernel<<<blocks, threads>>>(device_output, device_targets, device_grad_output, elements);
 
             net.backward(device_inputs, ctx, device_grad_output, device_grad_input, batch_size);
-            net.sgd_update(learning_rate);
+            net.adamw_update(learning_rate, beta1, beta2, eps, weight_decay);
 
             muon::NeuralNetwork::release_context(ctx);
         }

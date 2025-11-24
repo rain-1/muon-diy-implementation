@@ -68,6 +68,8 @@ int main() {
     // auto output = net.forward(device_input, batch_size, ctx);
     // net.backward(device_input, ctx, grad_output, grad_input, batch_size);
     // net.sgd_update(learning_rate);
+    // or
+    // net.adamw_update(learning_rate);
 
     // Persist parameters to disk.
     // net.save("mlp.bin");
