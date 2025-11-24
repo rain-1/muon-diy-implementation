@@ -57,6 +57,10 @@ struct LabelScore {
 };
 
 std::vector<LabelScore> predict(const std::vector<float>& input) {
+    // Scores are simple heuristic combinations of the per-channel means, overall brightness,
+    // and saturation. The intent is to create clearly different outputs depending on whether
+    // the image is bright/desaturated ("snow"), blue-dominant ("ocean"), green-dominant
+    // ("forest"), red-leaning ("sunset"), low-saturation ("indoor"), or mixed ("city").
     static const std::array<std::string, 6> labels = {
         "forest",
         "ocean",
@@ -66,31 +70,24 @@ std::vector<LabelScore> predict(const std::vector<float>& input) {
         "city"
     };
 
-    // Simple handcrafted weights over five features (r_mean, g_mean, b_mean, brightness, saturation)
-    static const std::array<std::array<float, 5>, 6> weights = {
-        std::array<float, 5>{-0.1f, 0.8f, -0.2f, 0.2f, 0.6f},  // forest
-        std::array<float, 5>{-0.2f, 0.1f, 1.0f, 0.3f, 0.5f},   // ocean
-        std::array<float, 5>{0.9f, 0.2f, -0.1f, 0.4f, 0.3f},  // sunset
-        std::array<float, 5>{0.4f, 0.4f, 0.5f, 0.9f, -0.2f},  // snow
-        std::array<float, 5>{0.3f, 0.3f, 0.1f, 0.2f, 0.1f},   // indoor
-        std::array<float, 5>{0.2f, 0.3f, 0.4f, 0.5f, 0.2f}    // city
-    };
-
-    static const std::array<float, 6> bias = {0.05f, -0.1f, 0.1f, 0.0f, -0.05f, 0.02f};
-
     ImageStats stats = compute_stats(input);
-    const std::array<float, 5> features = {stats.r_mean, stats.g_mean, stats.b_mean, stats.brightness, stats.saturation};
+
+    const float color_balance = (stats.r_mean + stats.g_mean + stats.b_mean) / 3.0f;
+    const float red_dominance = stats.r_mean - ((stats.g_mean + stats.b_mean) / 2.0f);
+    const float green_dominance = stats.g_mean - ((stats.r_mean + stats.b_mean) / 2.0f);
+    const float blue_dominance = stats.b_mean - ((stats.r_mean + stats.g_mean) / 2.0f);
+    const float contrast_proxy = std::abs(stats.r_mean - stats.g_mean) + std::abs(stats.g_mean - stats.b_mean) +
+                                 std::abs(stats.b_mean - stats.r_mean);
 
     std::vector<LabelScore> scores;
     scores.reserve(labels.size());
 
-    for (size_t i = 0; i < labels.size(); ++i) {
-        float score = bias[i];
-        for (size_t f = 0; f < features.size(); ++f) {
-            score += weights[i][f] * features[f];
-        }
-        scores.push_back({labels[i], score});
-    }
+    scores.push_back({"forest", 0.6f * green_dominance + 0.2f * stats.saturation - 0.1f * stats.brightness});
+    scores.push_back({"ocean", 0.8f * blue_dominance + 0.3f * stats.saturation + 0.05f * stats.brightness});
+    scores.push_back({"sunset", 0.7f * red_dominance + 0.4f * stats.brightness + 0.2f * stats.saturation});
+    scores.push_back({"snow", 1.0f * stats.brightness - 0.7f * stats.saturation + 0.1f * color_balance});
+    scores.push_back({"indoor", 0.4f * color_balance - 0.2f * stats.saturation});
+    scores.push_back({"city", 0.3f * stats.brightness + 0.4f * contrast_proxy + 0.1f * stats.saturation});
 
     std::partial_sort(scores.begin(), scores.begin() + 3, scores.end(), [](const LabelScore& a, const LabelScore& b) {
         return a.score > b.score;
