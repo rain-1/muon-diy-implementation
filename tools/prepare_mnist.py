@@ -1,25 +1,35 @@
 import gzip
 import struct
-import urllib.request
+import subprocess
 from array import array
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
-MNIST_URLS = {
-    "train_images": "http://yann.lecun.com/exdb/mnist/train-images-idx3-ubyte.gz",
-    "train_labels": "http://yann.lecun.com/exdb/mnist/train-labels-idx1-ubyte.gz",
-    "test_images": "http://yann.lecun.com/exdb/mnist/t10k-images-idx3-ubyte.gz",
-    "test_labels": "http://yann.lecun.com/exdb/mnist/t10k-labels-idx1-ubyte.gz",
-}
+
+REPO_URL = "https://huggingface.co/datasets/ylecun/mnist"
 
 
-def download_file(url: str, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        print(f"Skipping download, found existing {dest}")
-        return
-    print(f"Downloading {url} -> {dest}")
-    urllib.request.urlretrieve(url, dest)
+def ensure_repo(root: Path) -> Path:
+    """Clone the HuggingFace MNIST dataset (uses git-lfs) if not present."""
+
+    target = root / "source"
+    if (target / ".git").exists():
+        print(f"Reusing existing repository at {target}")
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Cloning {REPO_URL} -> {target}")
+    subprocess.run(
+        ["git", "clone", REPO_URL, str(target)], check=True, cwd=root
+    )
+    return target
+
+
+def find_file(repo_root: Path, filename: str) -> Path:
+    for path in repo_root.rglob(filename):
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"Could not find {filename} under {repo_root}")
 
 
 def _read_idx_header(raw: bytes) -> Tuple[int, int, List[int]]:
@@ -89,15 +99,19 @@ def write_tensor(path: Path, shape: Sequence[int], data: array) -> None:
 
 
 def prepare_dataset(root: Path) -> None:
-    download_dir = root / "raw"
-    processed_dir = root / "processed"
-    for key, url in MNIST_URLS.items():
-        download_file(url, download_dir / f"{key}.gz")
+    repo_root = ensure_repo(root)
 
-    train_pixels, train_image_shape = read_images(download_dir / "train_images.gz")
-    test_pixels, test_image_shape = read_images(download_dir / "test_images.gz")
-    train_labels, train_label_shape = read_labels(download_dir / "train_labels.gz")
-    test_labels, test_label_shape = read_labels(download_dir / "test_labels.gz")
+    processed_dir = root / "processed"
+
+    train_images_path = find_file(repo_root, "train-images-idx3-ubyte.gz")
+    test_images_path = find_file(repo_root, "t10k-images-idx3-ubyte.gz")
+    train_labels_path = find_file(repo_root, "train-labels-idx1-ubyte.gz")
+    test_labels_path = find_file(repo_root, "t10k-labels-idx1-ubyte.gz")
+
+    train_pixels, train_image_shape = read_images(train_images_path)
+    test_pixels, test_image_shape = read_images(test_images_path)
+    train_labels, train_label_shape = read_labels(train_labels_path)
+    test_labels, test_label_shape = read_labels(test_labels_path)
 
     if train_image_shape[0] != train_label_shape[0]:
         raise ValueError("Train image/label count mismatch")

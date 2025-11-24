@@ -25,10 +25,11 @@ cmake --build . --target xor_example
 
 ### MNIST example
 
-1. Prepare the dataset (downloads the raw files from Yann LeCun's site and writes normalized binaries under
+1. Prepare the dataset (clones `https://huggingface.co/datasets/ylecun/mnist` with git-lfs and writes normalized binaries under
    `datasets/mnist/processed`):
 
    ```bash
+   git lfs install --system # only needed once
    python3 tools/prepare_mnist.py
    ```
 
