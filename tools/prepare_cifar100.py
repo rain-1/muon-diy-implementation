@@ -10,6 +10,12 @@ REPO_ID = "uoft-cs/cifar100"
 
 
 def normalize_images(images: Iterable[Image.Image]) -> array:
+    """Normalize CIFAR-100 images to zero mean / unit variance per channel."""
+
+    # Standard channel statistics used by many CIFAR-100 baselines.
+    mean = (0.5071, 0.4867, 0.4409)
+    std = (0.2673, 0.2564, 0.2762)
+
     data = array("f")
     for img in images:
         if not isinstance(img, Image.Image):
@@ -20,7 +26,13 @@ def normalize_images(images: Iterable[Image.Image]) -> array:
             raise ValueError(f"Unexpected image size {img.size}; expected 32x32")
         for pixel in img.getdata():
             r, g, b = pixel
-            data.extend((r / 255.0, g / 255.0, b / 255.0))
+            data.extend(
+                (
+                    (r / 255.0 - mean[0]) / std[0],
+                    (g / 255.0 - mean[1]) / std[1],
+                    (b / 255.0 - mean[2]) / std[2],
+                )
+            )
     return data
 
 

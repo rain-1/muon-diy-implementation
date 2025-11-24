@@ -6,6 +6,8 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <numeric>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -155,12 +157,12 @@ int main() {
     NeuralNetwork net({input_dim, 512, 256, 128, num_classes});
 
     const int batch_size = 128;
-    const int epochs = 20;
-    const float learning_rate = 0.0008f;
+    const int epochs = 30;
+    const float learning_rate = 0.001f;
     const float beta1 = 0.9f;
     const float beta2 = 0.999f;
     const float eps = 1e-8f;
-    const float weight_decay = 0.01f;
+    const float weight_decay = 0.005f;
     const int steps_per_epoch = train_samples / batch_size;
 
     float* device_inputs = nullptr;
@@ -173,6 +175,13 @@ int main() {
     check_cuda(cudaMalloc(&device_grad_input, static_cast<size_t>(batch_size * input_dim) * sizeof(float)),
                "alloc grad input");
 
+    std::vector<float> host_batch_inputs(static_cast<size_t>(batch_size * input_dim));
+    std::vector<float> host_batch_labels(static_cast<size_t>(batch_size * num_classes));
+    std::vector<int> indices(train_samples);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    std::mt19937 rng(42);
+
     for (int epoch = 0; epoch < epochs; ++epoch) {
         float epoch_loss = 0.0f;
         float epoch_acc = 0.0f;
@@ -180,12 +189,21 @@ int main() {
         std::vector<float> host_output(static_cast<size_t>(batch_size * num_classes));
         std::vector<float> host_grad_output(host_output.size());
 
+        std::shuffle(indices.begin(), indices.end(), rng);
+
         for (int step = 0; step < steps_per_epoch; ++step) {
-            int offset = step * batch_size * input_dim;
-            int label_offset = step * batch_size * num_classes;
+            for (int b = 0; b < batch_size; ++b) {
+                int idx = indices[step * batch_size + b];
+                std::copy_n(train_images.data.data() + static_cast<size_t>(idx) * input_dim,
+                            input_dim,
+                            host_batch_inputs.data() + static_cast<size_t>(b) * input_dim);
+                std::copy_n(train_labels.data.data() + static_cast<size_t>(idx) * num_classes,
+                            num_classes,
+                            host_batch_labels.data() + static_cast<size_t>(b) * num_classes);
+            }
 
             check_cuda(cudaMemcpy(device_inputs,
-                                   train_images.data.data() + offset,
+                                   host_batch_inputs.data(),
                                    static_cast<size_t>(batch_size * input_dim) * sizeof(float),
                                    cudaMemcpyHostToDevice),
                        "copy inputs");
@@ -199,14 +217,12 @@ int main() {
                                    cudaMemcpyDeviceToHost),
                        "read output");
 
-            std::vector<float> target_slice(train_labels.data.data() + label_offset,
-                                            train_labels.data.data() + label_offset + host_output.size());
             std::vector<float> probs = softmax(host_output, batch_size, num_classes);
-            epoch_loss += cross_entropy(probs, target_slice, batch_size, num_classes);
-            epoch_acc += batch_accuracy(probs, target_slice, batch_size, num_classes);
+            epoch_loss += cross_entropy(probs, host_batch_labels, batch_size, num_classes);
+            epoch_acc += batch_accuracy(probs, host_batch_labels, batch_size, num_classes);
 
             for (size_t i = 0; i < host_grad_output.size(); ++i) {
-                host_grad_output[i] = (probs[i] - target_slice[i]) / static_cast<float>(batch_size);
+                host_grad_output[i] = (probs[i] - host_batch_labels[i]) / static_cast<float>(batch_size);
             }
             check_cuda(cudaMemcpy(device_grad_output,
                                    host_grad_output.data(),

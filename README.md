@@ -54,8 +54,8 @@ cmake --build . --target xor_example
 ### CIFAR-100 example
 
 1. Prepare the dataset (writes normalized binaries under `datasets/cifar100/processed`).
-   This script uses the HuggingFace dataset `uoft-cs/cifar100` and requires
-   `datasets` and `Pillow`.
+   The script standardizes channels to the common CIFAR-100 mean/std using the
+   HuggingFace dataset `uoft-cs/cifar100` and requires `datasets` and `Pillow`.
 
    ```bash
    pip install datasets pillow
