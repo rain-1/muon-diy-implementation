@@ -154,10 +154,10 @@ int main() {
     const int input_dim = train_images.shape[1];
     const int num_classes = train_labels.shape[1];
 
-    NeuralNetwork net({input_dim, 512, 256, 128, num_classes});
+    NeuralNetwork net({input_dim, 32*32*3*4, 32*32, 32*32, 16*16, 16*16, 8*8, 8*8, num_classes});
 
     const int batch_size = 128;
-    const int epochs = 30;
+    const int epochs = 480;
     const float learning_rate = 0.001f;
     const float beta1 = 0.9f;
     const float beta2 = 0.999f;
@@ -239,6 +239,12 @@ int main() {
         std::cout << "Epoch " << (epoch + 1) << "/" << epochs
                   << " loss=" << epoch_loss / steps_per_epoch
                   << " acc=" << epoch_acc / steps_per_epoch << "\n";
+
+        // Save the model to disk after each epoch
+//        std::string model_path = "model_epoch_" + std::to_string(epoch + 1) + ".bin";
+        std::string model_path = "model_in_training.bin";
+        net.save(model_path);
+        std::cout << "Model saved to " << model_path << "\n";
     }
 
     if (test_images.shape.size() != 2 || test_images.shape[1] != input_dim) {
