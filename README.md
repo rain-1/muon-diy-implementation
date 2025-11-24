@@ -25,11 +25,20 @@ cmake --build . --target xor_example
 
 ### MNIST example
 
-1. Prepare the dataset (clones `https://huggingface.co/datasets/ylecun/mnist` with git-lfs and writes normalized binaries under
-   `datasets/mnist/processed`):
+1. Prepare the dataset (writes normalized binaries under `datasets/mnist/processed`).
+   The script can consume either the original IDX gzip archives **or** the
+   HuggingFace parquet export (`train-00000-of-00001.parquet` and
+   `test-00000-of-00001.parquet`). If you already have the dataset, place it
+   under `datasets/mnist/source/` (with or without git metadata). Otherwise, it
+   will attempt to clone `https://huggingface.co/datasets/ylecun/mnist` using
+   git-lfs.
 
    ```bash
-   git lfs install --system # only needed once
+   # Optional: only required if cloning the HuggingFace repository
+   git lfs install --system
+
+   # Required when reading parquet exports
+   pip install pyarrow pillow
    python3 tools/prepare_mnist.py
    ```
 

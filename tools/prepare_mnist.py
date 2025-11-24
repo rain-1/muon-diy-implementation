@@ -1,4 +1,5 @@
 import gzip
+import io
 import struct
 import subprocess
 from array import array
@@ -17,11 +18,29 @@ def ensure_repo(root: Path) -> Path:
         print(f"Reusing existing repository at {target}")
         return target
 
+    if target.exists():
+        has_known_data = any(target.rglob("*.parquet")) or any(
+            target.rglob("*idx*-ubyte.gz")
+        )
+        if has_known_data:
+            print(
+                f"Reusing existing dataset at {target} (no git metadata detected)"
+            )
+            return target
+
     target.parent.mkdir(parents=True, exist_ok=True)
     print(f"Cloning {REPO_URL} -> {target}")
-    subprocess.run(
-        ["git", "clone", REPO_URL, str(target)], check=True, cwd=root
-    )
+    try:
+        subprocess.run(
+            ["git", "clone", REPO_URL, str(target)], check=True, cwd=root
+        )
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            "Failed to clone MNIST repository. If you already downloaded the dataset "
+            f"(e.g., via `git clone {REPO_URL}`), place it under {target} and rerun. "
+            "HuggingFace parquet exports named train-00000-of-00001.parquet and "
+            "test-00000-of-00001.parquet are also supported."
+        ) from exc
     return target
 
 
@@ -30,6 +49,14 @@ def find_file(repo_root: Path, filename: str) -> Path:
         if path.is_file():
             return path
     raise FileNotFoundError(f"Could not find {filename} under {repo_root}")
+
+
+def find_parquet(repo_root: Path, split: str) -> Path:
+    pattern = f"{split}-*.parquet"
+    for path in repo_root.rglob(pattern):
+        if path.is_file():
+            return path
+    raise FileNotFoundError(f"Could not find parquet split matching {pattern} under {repo_root}")
 
 
 def _read_idx_header(raw: bytes) -> Tuple[int, int, List[int]]:
@@ -98,20 +125,75 @@ def write_tensor(path: Path, shape: Sequence[int], data: array) -> None:
     print(f"Wrote tensor {tuple(shape)} -> {path}")
 
 
+def load_split_from_parquet(parquet_path: Path) -> Tuple[List[int], Tuple[int, ...], List[int], Tuple[int, ...]]:
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "pyarrow is required to read parquet MNIST exports. Install with `pip install pyarrow`."
+        ) from exc
+
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            "Pillow is required to decode PNG images embedded in the parquet file. Install with `pip install pillow`."
+        ) from exc
+
+    table = pq.read_table(parquet_path, columns=["image", "label"])
+    labels = [int(value) for value in table.column("label").to_pylist()]
+
+    pixels: List[int] = []
+    for entry in table.column("image").to_pylist():
+        if isinstance(entry, dict):
+            blob = entry.get("bytes") or entry.get("data")
+        elif isinstance(entry, (bytes, bytearray, memoryview)):
+            blob = bytes(entry)
+        else:
+            raise ValueError(f"Unsupported image payload type: {type(entry)}")
+
+        if blob is None:
+            raise ValueError("Image entry missing bytes field")
+
+        with Image.open(io.BytesIO(blob)) as img:
+            img = img.convert("L")
+            if img.size != (28, 28):
+                raise ValueError(f"Unexpected image size {img.size} in {parquet_path}")
+            pixels.extend(list(img.getdata()))
+
+    image_shape = (len(labels), 28, 28)
+    label_shape = (len(labels),)
+    if len(pixels) != image_shape[0] * 28 * 28:
+        raise ValueError("Parquet image payload size mismatch")
+    return pixels, image_shape, labels, label_shape
+
+
 def prepare_dataset(root: Path) -> None:
     repo_root = ensure_repo(root)
 
     processed_dir = root / "processed"
 
-    train_images_path = find_file(repo_root, "train-images-idx3-ubyte.gz")
-    test_images_path = find_file(repo_root, "t10k-images-idx3-ubyte.gz")
-    train_labels_path = find_file(repo_root, "train-labels-idx1-ubyte.gz")
-    test_labels_path = find_file(repo_root, "t10k-labels-idx1-ubyte.gz")
+    try:
+        train_images_path = find_file(repo_root, "train-images-idx3-ubyte.gz")
+        test_images_path = find_file(repo_root, "t10k-images-idx3-ubyte.gz")
+        train_labels_path = find_file(repo_root, "train-labels-idx1-ubyte.gz")
+        test_labels_path = find_file(repo_root, "t10k-labels-idx1-ubyte.gz")
+    except FileNotFoundError:
+        print("IDX archives not found; falling back to parquet exports")
+        train_parquet = find_parquet(repo_root, "train")
+        test_parquet = find_parquet(repo_root, "test")
 
-    train_pixels, train_image_shape = read_images(train_images_path)
-    test_pixels, test_image_shape = read_images(test_images_path)
-    train_labels, train_label_shape = read_labels(train_labels_path)
-    test_labels, test_label_shape = read_labels(test_labels_path)
+        train_pixels, train_image_shape, train_labels, train_label_shape = (
+            load_split_from_parquet(train_parquet)
+        )
+        test_pixels, test_image_shape, test_labels, test_label_shape = (
+            load_split_from_parquet(test_parquet)
+        )
+    else:
+        train_pixels, train_image_shape = read_images(train_images_path)
+        test_pixels, test_image_shape = read_images(test_images_path)
+        train_labels, train_label_shape = read_labels(train_labels_path)
+        test_labels, test_label_shape = read_labels(test_labels_path)
 
     if train_image_shape[0] != train_label_shape[0]:
         raise ValueError("Train image/label count mismatch")
