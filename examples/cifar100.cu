@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -60,24 +61,6 @@ Tensor load_tensor(const std::string& path) {
     return {std::move(shape), std::move(data)};
 }
 
-__global__ void mse_grad_kernel(const float* preds, const float* targets, float* grad, int n) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n) return;
-    grad[idx] = 2.0f * (preds[idx] - targets[idx]) / static_cast<float>(n);
-}
-
-float mse_loss(const std::vector<float>& preds, const std::vector<float>& targets) {
-    if (preds.size() != targets.size()) {
-        throw std::runtime_error("Loss vectors must match in size");
-    }
-    float acc = 0.0f;
-    for (size_t i = 0; i < preds.size(); ++i) {
-        float diff = preds[i] - targets[i];
-        acc += diff * diff;
-    }
-    return acc / static_cast<float>(preds.size());
-}
-
 float batch_accuracy(const std::vector<float>& preds, const std::vector<float>& targets, int batch, int classes) {
     int correct = 0;
     for (int i = 0; i < batch; ++i) {
@@ -106,6 +89,42 @@ float batch_accuracy(const std::vector<float>& preds, const std::vector<float>& 
         }
     }
     return static_cast<float>(correct) / static_cast<float>(batch);
+}
+
+std::vector<float> softmax(const std::vector<float>& logits, int batch, int classes) {
+    std::vector<float> probs(logits.size());
+    for (int i = 0; i < batch; ++i) {
+        const float* row = logits.data() + static_cast<size_t>(i) * classes;
+        float row_max = row[0];
+        for (int c = 1; c < classes; ++c) row_max = std::max(row_max, row[c]);
+
+        float sum = 0.0f;
+        for (int c = 0; c < classes; ++c) {
+            float e = std::exp(row[c] - row_max);
+            probs[static_cast<size_t>(i) * classes + c] = e;
+            sum += e;
+        }
+        float inv_sum = 1.0f / sum;
+        for (int c = 0; c < classes; ++c) {
+            probs[static_cast<size_t>(i) * classes + c] *= inv_sum;
+        }
+    }
+    return probs;
+}
+
+float cross_entropy(const std::vector<float>& probs, const std::vector<float>& targets, int batch, int classes) {
+    float loss = 0.0f;
+    for (int i = 0; i < batch; ++i) {
+        int target_idx = 0;
+        for (int c = 0; c < classes; ++c) {
+            if (targets[static_cast<size_t>(i) * classes + c] > targets[static_cast<size_t>(i) * classes + target_idx]) {
+                target_idx = c;
+            }
+        }
+        float prob = probs[static_cast<size_t>(i) * classes + target_idx];
+        loss -= std::log(std::max(prob, 1e-10f));
+    }
+    return loss / static_cast<float>(batch);
 }
 
 }  // namespace
@@ -137,7 +156,7 @@ int main() {
 
     const int batch_size = 128;
     const int epochs = 20;
-    const float learning_rate = 0.0015f;
+    const float learning_rate = 0.0008f;
     const float beta1 = 0.9f;
     const float beta2 = 0.999f;
     const float eps = 1e-8f;
@@ -145,12 +164,10 @@ int main() {
     const int steps_per_epoch = train_samples / batch_size;
 
     float* device_inputs = nullptr;
-    float* device_targets = nullptr;
     float* device_grad_output = nullptr;
     float* device_grad_input = nullptr;
 
     check_cuda(cudaMalloc(&device_inputs, static_cast<size_t>(batch_size * input_dim) * sizeof(float)), "alloc inputs");
-    check_cuda(cudaMalloc(&device_targets, static_cast<size_t>(batch_size * num_classes) * sizeof(float)), "alloc targets");
     check_cuda(cudaMalloc(&device_grad_output, static_cast<size_t>(batch_size * num_classes) * sizeof(float)),
                "alloc grad output");
     check_cuda(cudaMalloc(&device_grad_input, static_cast<size_t>(batch_size * input_dim) * sizeof(float)),
@@ -159,6 +176,9 @@ int main() {
     for (int epoch = 0; epoch < epochs; ++epoch) {
         float epoch_loss = 0.0f;
         float epoch_acc = 0.0f;
+
+        std::vector<float> host_output(static_cast<size_t>(batch_size * num_classes));
+        std::vector<float> host_grad_output(host_output.size());
 
         for (int step = 0; step < steps_per_epoch; ++step) {
             int offset = step * batch_size * input_dim;
@@ -169,36 +189,30 @@ int main() {
                                    static_cast<size_t>(batch_size * input_dim) * sizeof(float),
                                    cudaMemcpyHostToDevice),
                        "copy inputs");
-            check_cuda(cudaMemcpy(device_targets,
-                                   train_labels.data.data() + label_offset,
-                                   static_cast<size_t>(batch_size * num_classes) * sizeof(float),
-                                   cudaMemcpyHostToDevice),
-                       "copy targets");
 
             ForwardContext ctx;
             float* device_output = net.forward(device_inputs, batch_size, ctx);
 
-            std::vector<float> host_output(static_cast<size_t>(batch_size * num_classes));
             check_cuda(cudaMemcpy(host_output.data(),
                                    device_output,
                                    host_output.size() * sizeof(float),
                                    cudaMemcpyDeviceToHost),
                        "read output");
 
-            float loss = mse_loss(host_output,
-                                  std::vector<float>(train_labels.data.data() + label_offset,
-                                                     train_labels.data.data() + label_offset + host_output.size()));
-            epoch_loss += loss;
-            epoch_acc += batch_accuracy(host_output,
-                                        std::vector<float>(train_labels.data.data() + label_offset,
-                                                           train_labels.data.data() + label_offset + host_output.size()),
-                                        batch_size,
-                                        num_classes);
+            std::vector<float> target_slice(train_labels.data.data() + label_offset,
+                                            train_labels.data.data() + label_offset + host_output.size());
+            std::vector<float> probs = softmax(host_output, batch_size, num_classes);
+            epoch_loss += cross_entropy(probs, target_slice, batch_size, num_classes);
+            epoch_acc += batch_accuracy(probs, target_slice, batch_size, num_classes);
 
-            int threads = 256;
-            int elements = batch_size * num_classes;
-            int blocks = (elements + threads - 1) / threads;
-            mse_grad_kernel<<<blocks, threads>>>(device_output, device_targets, device_grad_output, elements);
+            for (size_t i = 0; i < host_grad_output.size(); ++i) {
+                host_grad_output[i] = (probs[i] - target_slice[i]) / static_cast<float>(batch_size);
+            }
+            check_cuda(cudaMemcpy(device_grad_output,
+                                   host_grad_output.data(),
+                                   host_grad_output.size() * sizeof(float),
+                                   cudaMemcpyHostToDevice),
+                       "copy grad output");
 
             net.backward(device_inputs, ctx, device_grad_output, device_grad_input, batch_size);
             net.adamw_update(learning_rate, beta1, beta2, eps, weight_decay);
@@ -229,11 +243,6 @@ int main() {
                            static_cast<size_t>(test_batch * input_dim) * sizeof(float),
                            cudaMemcpyHostToDevice),
                "copy test inputs");
-    check_cuda(cudaMemcpy(device_targets,
-                           test_labels.data.data(),
-                           static_cast<size_t>(test_batch * num_classes) * sizeof(float),
-                           cudaMemcpyHostToDevice),
-               "copy test targets");
 
     ForwardContext ctx;
     float* device_output = net.forward(device_inputs, test_batch, ctx);
@@ -241,19 +250,16 @@ int main() {
     check_cuda(cudaMemcpy(host_output.data(), device_output, host_output.size() * sizeof(float), cudaMemcpyDeviceToHost),
                "read test output");
 
-    float test_loss = mse_loss(host_output, std::vector<float>(test_labels.data.begin(),
-                                                               test_labels.data.begin() + host_output.size()));
-    float test_acc = batch_accuracy(host_output, std::vector<float>(test_labels.data.begin(),
-                                                                    test_labels.data.begin() + host_output.size()),
-                                    test_batch,
-                                    num_classes);
+    std::vector<float> test_targets(test_labels.data.begin(), test_labels.data.begin() + host_output.size());
+    std::vector<float> test_probs = softmax(host_output, test_batch, num_classes);
+    float test_loss = cross_entropy(test_probs, test_targets, test_batch, num_classes);
+    float test_acc = batch_accuracy(test_probs, test_targets, test_batch, num_classes);
 
     std::cout << "Test batch loss=" << test_loss << " acc=" << test_acc << "\n";
 
     muon::NeuralNetwork::release_context(ctx);
 
     cudaFree(device_inputs);
-    cudaFree(device_targets);
     cudaFree(device_grad_output);
     cudaFree(device_grad_input);
 
