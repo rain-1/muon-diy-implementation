@@ -12,6 +12,8 @@ REPO_ID = "uoft-cs/cifar100"
 def normalize_images(images: Iterable[Image.Image]) -> array:
     data = array("f")
     for img in images:
+        if not isinstance(img, Image.Image):
+            img = Image.fromarray(img)
         if img.mode != "RGB":
             img = img.convert("RGB")
         if img.size != (32, 32):
@@ -47,11 +49,20 @@ def prepare_dataset(root: Path) -> None:
     train = dataset["train"]
     test = dataset["test"]
 
-    train_images = normalize_images(train["image"])
-    test_images = normalize_images(test["image"])
+    def get_column(split, names):
+        for name in names:
+            if name in split.column_names:
+                return split[name]
+        raise ValueError(f"None of the candidate columns {names} were found in split")
 
-    train_labels = [int(label) for label in train["fine_label"]]
-    test_labels = [int(label) for label in test["fine_label"]]
+    image_column_candidates = ("image", "img")
+    label_column_candidates = ("fine_label", "label", "coarse_label", "course_label")
+
+    train_images = normalize_images(get_column(train, image_column_candidates))
+    test_images = normalize_images(get_column(test, image_column_candidates))
+
+    train_labels = [int(label) for label in get_column(train, label_column_candidates)]
+    test_labels = [int(label) for label in get_column(test, label_column_candidates)]
 
     train_labels_oh = to_one_hot(train_labels)
     test_labels_oh = to_one_hot(test_labels)
