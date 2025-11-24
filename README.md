@@ -1,1 +1,39 @@
 # muon-diy-implementation
+
+A barebones C++/CUDA multilayer perceptron consisting of fully connected linear layers with bias and GELU activation. Networks are parameterized by a list of layer sizes and expose forward/backward, SGD updates, and binary serialization.
+
+## Building
+
+```bash
+mkdir -p build && cd build
+cmake ..
+cmake --build .
+```
+
+This produces a static library `libmuon_nn.a` exposing the neural network interface in `include/nn.h`. CUDA is required for compilation.
+
+## Usage sketch
+
+```cpp
+#include "nn.h"
+
+int main() {
+    // Define a 3-layer MLP: input 784 -> hidden 128 -> output 10.
+    muon::NeuralNetwork net({784, 128, 10});
+    muon::ForwardContext ctx;
+
+    // Allocate device input/output/gradient buffers before calling forward/backward.
+    // float* device_input = ...;
+    // float* grad_output = ...; // upstream gradient at network output
+
+    // auto output = net.forward(device_input, batch_size, ctx);
+    // net.backward(device_input, ctx, grad_output, grad_input, batch_size);
+    // net.sgd_update(learning_rate);
+
+    // Persist parameters to disk.
+    // net.save("mlp.bin");
+    // net.load("mlp.bin");
+}
+```
+
+See `design.md` for notes on future logging and dataset integrations.
